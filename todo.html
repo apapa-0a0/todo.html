@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>視覺設計部專案時程看板</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/vis-timeline/7.7.3/vis-timeline-graph2d.min.css" rel="stylesheet" type="text/css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/vis-timeline/7.7.3/vis-timeline-graph2d.min.js"></script>
+    <style>
+        body { font-family: 'PingFang TC', 'Microsoft JhengHei', sans-serif; padding: 20px; background-color: #f5f5f7; }
+        h2 { color: #1d1d1f; font-size: 24px; margin-bottom: 5px; }
+        p.subtitle { color: #86868b; margin-top: 0; margin-bottom: 20px; font-size: 14px; }
+        .form-box { background: white; padding: 15px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .form-box input, .form-box select, .form-box button { padding: 8px; margin-right: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }
+        .form-box button { background-color: #0071e3; color: white; border: none; cursor: pointer; font-weight: bold; }
+        .form-box button:hover { background-color: #0077ed; }
+        .vis-item.routine { background-color: #e3f2fd; border-color: #2196f3; color: #0d47a1; }
+        .vis-item.project { background-color: #e8f5e9; border-color: #4caf50; color: #1b5e20; }
+        .vis-item.social { background-color: #fff3e0; border-color: #ff9800; color: #e65100; }
+        .vis-item.urgent { background-color: #ffebee; border-color: #f44336; color: #b71c1c; font-weight: bold; animation: blink 1s infinite alternate; }
+        @keyframes blink { from { box-shadow: 0 0 2px #f44336; } to { box-shadow: 0 0 10px #f44336; } }
+    </style>
+</head>
+<body>
+
+    <h2>📊設計專案時程表</h2>
+    <p class="subtitle">※ 本看板即時更新常態業務與跨部門協作進度。</p>
+    
+    <div class="form-box" id="adminControl">
+        <input type="text" id="taskName" placeholder="輸入任務名稱（如：雙11主視覺選定）" style="width: 250px;">
+        <label>開始：</label><input type="date" id="startDate">
+        <label>結束：</label><input type="date" id="endDate">
+        <select id="taskType">
+            <option value="routine">常態工作 (藍色)</option>
+            <option value="project">主要專案 (綠色)</option>
+            <option value="social">其他瑣事 (橘色)</option>
+            <option value="urgent">🚨 臨時追加急件 (紅色閃爍)</option>
+        </select>
+        <button onclick="addItem()">＋新增到時程表</button>
+        <button onclick="exportForManager()" style="background-color: #34c759;">💾 複製主管版網頁代碼</button>
+        <button onclick="clearStorage()" style="background-color: #ff3b30;">整個清空重置</button>
+    </div>
+
+    <div id="visualization"></div>
+
+    <script>
+        var groups = new vis.DataSet([
+            {id: 'track1', content: '<b>💼 每日例行常態</b>'},
+            {id: 'track2', content: '<b>🚀 核心主要專案</b>'},
+            {id: 'track4', content: '<b>📱 社群與零星排單</b>'},
+            {id: 'track3', content: '<b>🚨 臨時加開急件</b>'}
+        ]);
+
+        var items = new vis.DataSet();
+        var today = new Date();
+
+        // 判斷目前這個網頁是「你的管理版」還是「發布出去的主管唯讀版」
+        // 如果程式碼裡已經寫死了資料，那就是主管唯讀版
+        var isReadOnly = false; 
+        /* DATA_PLACEHOLDER */ 
+
+        if (isReadOnly) {
+            // 如果是主管唯讀版，隱藏上方控制台
+            document.getElementById('adminControl').style.display = 'none';
+        } else {
+            // 如果是你的管理版，從本機讀取資料
+            var savedData = localStorage.getItem('designer_tasks_v4');
+            if (!savedData) {
+                var startEx = new Date(today.getTime() - (2 * 24 * 60 * 60 * 1000));
+                var endEx = new Date(today.getTime() + (7 * 24 * 60 * 60 * 1000));
+                var defaultItems = [
+                    {id: 'user_r1', group: 'track1', content: '🔄 每日社群圖文製作', start: startEx, end: endEx, className: 'routine'},
+                    {id: 'user_r2', group: 'track1', content: '📅 每週雙週刊排版與校對', start: startEx, end: endEx, className: 'routine'}
+                ];
+                localStorage.setItem('designer_tasks_v4', JSON.stringify(defaultItems));
+                savedData = JSON.stringify(defaultItems);
+            }
+            var parsed = JSON.parse(savedData);
+            parsed.forEach(function(item) {
+                item.start = new Date(item.start);
+                item.end = new Date(item.end);
+                items.add(item);
+            });
+        }
+
+        var container = document.getElementById('visualization');
+        var options = {
+            stack: true,
+            start: new Date(today.getTime() - (3 * 24 * 60 * 60 * 1000)), 
+            end: new Date(today.getTime() + (10 * 24 * 60 * 60 * 1000)),  
+            editable: !isReadOnly, // 如果是唯讀版，關閉所有編輯功能
+            onMove: function (item, callback) { callback(item); saveToStorage(); },
+            onRemove: function (item, callback) { callback(item); saveToStorage(); }
+        };
+
+        var timeline = new vis.Timeline(container, items, groups, options);
+
+        function addItem() {
+            var name = document.getElementById('taskName').value;
+            var start = document.getElementById('startDate').value;
+            var end = document.getElementById('endDate').value;
+            var type = document.getElementById('taskType').value;
+
+            if (!name || !start || !end) { alert('請填寫完整的名稱與起訖日期唷！'); return; }
+
+            var trackId = 'track2';
+            if (type === 'urgent') trackId = 'track3';
+            if (type === 'routine') trackId = 'track1';
+            if (type === 'social') trackId = 'track4';
+
+            var icon = '🚀 ';
+            if (type === 'urgent') icon = '🚨 ';
+            if (type === 'routine') icon = '🔄 ';
+            if (type === 'social') icon = '✨ ';
+
+            var newItem = {
+                id: 'user_' + Date.now(),
+                group: trackId,
+                content: icon + name,
+                start: new Date(start),
+                end: new Date(end),
+                className: type
+            };
+
+            items.add(newItem);
+            saveToStorage();
+            document.getElementById('taskName').value = '';
+        }
+
+        function saveToStorage() {
+            var allItems = items.get();
+            localStorage.setItem('designer_tasks_v4', JSON.stringify(allItems));
+        }
+
+        function clearStorage() {
+            if (confirm('確定要清空並重置所有資料嗎？')) {
+                localStorage.removeItem('designer_tasks_v4');
+                window.location.reload();
+            }
+        }
+
+        // 🌟 核心功能：產生完全拔除控制權、鎖死資料的主管專用網頁代碼
+        function exportForManager() {
+            var currentData = JSON.stringify(items.get());
+            var currentHtml = document.documentElement.outerHTML;
+            
+            // 透過置換技術，將資料硬生生寫死在給主管的網頁裡，並將唯讀模式打開
+            var injection = "\nisReadOnly = true;\nvar injectedData = " + currentData + ";\ninjectedData.forEach(function(item){ item.start = new Date(item.start); item.end = new Date(item.end); items.add(item); });\n/*";
+            var outputHtml = "<!DOCTYPE html>\n<html>\n" + currentHtml.replace('/* DATA_PLACEHOLDER */', injection) + "\n</html>";
+            
+            // 複製到剪貼簿
+            navigator.clipboard.writeText(outputHtml).then(function() {
+                alert('🎉 主管唯讀版代碼已成功複製到你的剪貼簿！\n請打開你雲端硬碟上的 HTML 檔案，全部覆蓋貼上並儲存即可！');
+            }, function() {
+                alert('複製失敗，請手動檢查瀏覽器權限。');
+            });
+        }
+    </script>
+</body>
+</html>
